@@ -83,10 +83,10 @@ print(f"Bronze rows: {spark.table(bronze_table).count()}")
 
 typed = (
     spark.table(bronze_table)
-    .withColumn("order_ts", F.to_timestamp("order_ts"))
-    .withColumn("updated_at", F.to_timestamp("updated_at"))
-    .withColumn("quantity", F.col("quantity").cast("int"))
-    .withColumn("unit_price", F.col("unit_price").cast("decimal(12,2)"))
+    .withColumn("order_ts", F.expr("try_cast(order_ts AS TIMESTAMP)"))
+    .withColumn("updated_at", F.expr("try_cast(updated_at AS TIMESTAMP)"))
+    .withColumn("quantity", F.expr("try_cast(quantity AS INT)"))
+    .withColumn("unit_price", F.expr("try_cast(unit_price AS DECIMAL(12,2))"))
 )
 quality_issue = (
     F.when(F.col("order_id").isNull() | (F.trim("order_id") == ""), "missing_order_id")
