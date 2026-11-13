@@ -1,0 +1,38 @@
+bundle:
+  name: medallion-orders
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for this environment
+    default: main
+  schema:
+    description: Unity Catalog schema for the pipeline tables and landing Volume
+    default: orders_demo
+  source_path:
+    description: Unity Catalog Volume directory receiving order JSONL files
+    default: /Volumes/main/orders_demo/landing/orders/
+  state_path:
+    description: Unity Catalog Volume directory for Auto Loader schema and checkpoint state
+    default: /Volumes/main/orders_demo/landing/_checkpoints/orders/
+
+targets:
+  dev:
+    default: true
+    mode: development
+
+resources:
+  jobs:
+    orders_pipeline_job:
+      name: ${bundle.name}-${bundle.target}
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: run_medallion_notebook
+          notebook_task:
+            notebook_path: ./notebooks/medallion_orders_pipeline.py
+            source: WORKSPACE
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              source_path: ${var.source_path}
+              state_path: ${var.state_path}
+
