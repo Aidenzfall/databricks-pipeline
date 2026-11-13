@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Orders pipeline with the medallion architecture
 # MAGIC
-# MAGIC Runnable starter: sample records flow through Bronze (raw), Silver (validated and deduplicated), and Gold (daily sales metrics). The inline source lets you try the pipeline without external files. Replace the source cell with a read from a landing location to connect real data.
+# MAGIC Runnable starter: sample records flow through Bronze (raw), Silver (validated and deduplicated), and Gold (daily sales metrics). Generate the sample JSONL batches and upload them to a Unity Catalog Volume to run the pipeline.
 # MAGIC
 # MAGIC Assumptions: Unity Catalog is enabled and tables use Delta. Set the catalog and schema widgets before running.
 
@@ -13,11 +13,13 @@ from pyspark.sql.window import Window
 
 dbutils.widgets.text("catalog", "main", "Unity Catalog catalog")
 dbutils.widgets.text("schema", "orders_demo", "Target schema")
+dbutils.widgets.text("source_path", "/Volumes/main/orders_demo/landing/orders/", "JSONL landing directory")
 catalog = dbutils.widgets.get("catalog").strip()
 schema = dbutils.widgets.get("schema").strip()
+source_path = dbutils.widgets.get("source_path").strip()
 
-if not catalog or not schema:
-    raise ValueError("catalog and schema widgets must be set")
+if not catalog or not schema or not source_path:
+    raise ValueError("catalog, schema, and source_path widgets must be set")
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
 bronze_table = f"{catalog}.{schema}.bronze_orders"
@@ -29,7 +31,7 @@ gold_table = f"{catalog}.{schema}.gold_daily_sales"
 
 # MAGIC %md
 # MAGIC ## Source
-# MAGIC The sample includes a duplicate order and an invalid row to demonstrate deduplication and quarantine. Replace this DataFrame with a read from cloud storage, a Volume, or a source table.
+# MAGIC Read the generated JSONL batches from a Unity Catalog Volume. Run `python scripts/generate_sample_data.py`, then upload the generated files to `source_path`. The batches include a duplicate, a later order update, late arriving business data, and an invalid row.
 
 # COMMAND ----------
 
@@ -42,28 +44,21 @@ source_schema = T.StructType([
     T.StructField("status", T.StringType(), True),
     T.StructField("updated_at", T.StringType(), True),
 ])
-sample_rows = [
-    ("1001", "C01", "2026-11-10 09:15:00", "2", "19.99", "COMPLETE", "2026-11-10 09:20:00"),
-    ("1002", "C02", "2026-11-10 10:00:00", "1", "8.50", "COMPLETE", "2026-11-10 10:02:00"),
-    ("1001", "C01", "2026-11-10 09:15:00", "2", "19.99", "COMPLETE", "2026-11-10 09:25:00"),  # later duplicate
-    ("1003", None, "not-a-timestamp", "0", "-4.00", "PENDING", "2026-11-11 08:00:00"),  # invalid
-    ("1004", "C03", "2026-11-11 11:30:00", "3", "12.00", "COMPLETE", "2026-11-11 11:31:00"),
-]
-source_df = spark.createDataFrame(sample_rows, source_schema)
+source_df = spark.read.schema(source_schema).option("multiLine", "false").json(source_path)
 display(source_df)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Bronze: preserve source records
-# MAGIC Bronze keeps the input columns and adds ingestion metadata. This demo overwrites its small sample table on each run. For real file ingestion, use Auto Loader with a checkpoint and append writes.
+# MAGIC Bronze keeps the input columns and adds ingestion metadata. This batch version overwrites its sample table on each run. The next increment will add checkpointed Auto Loader ingestion for append-only batches.
 
 # COMMAND ----------
 
 bronze_df = (
     source_df
     .withColumn("_ingested_at", F.current_timestamp())
-    .withColumn("_source_file", F.lit("inline_sample"))
+    .withColumn("_source_file", F.input_file_name())
 )
 (bronze_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(bronze_table))
 print(f"Bronze rows: {spark.table(bronze_table).count()}")
