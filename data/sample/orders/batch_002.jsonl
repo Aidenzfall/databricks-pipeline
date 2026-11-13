@@ -1,0 +1,5 @@
+{"order_id":"1001","customer_id":"C01","order_ts":"2026-11-10 09:15:00","quantity":"2","unit_price":"19.99","status":"COMPLETE","updated_at":"2026-11-10 09:20:00"}
+{"order_id":"1001","customer_id":"C01","order_ts":"2026-11-10 09:15:00","quantity":"3","unit_price":"19.99","status":"COMPLETE","updated_at":"2026-11-12 10:00:00"}
+{"order_id":"1003","customer_id":"C02","order_ts":"2026-11-09 16:45:00","quantity":"1","unit_price":"42.00","status":"COMPLETE","updated_at":"2026-11-12 12:00:00"}
+{"order_id":"1005","customer_id":null,"order_ts":"not-a-timestamp","quantity":"0","unit_price":"-4.00","status":"PENDING","updated_at":"2026-11-12 13:00:00"}
+
