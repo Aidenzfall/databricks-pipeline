@@ -14,12 +14,18 @@ from pyspark.sql.window import Window
 dbutils.widgets.text("catalog", "main", "Unity Catalog catalog")
 dbutils.widgets.text("schema", "orders_demo", "Target schema")
 dbutils.widgets.text("source_path", "/Volumes/main/orders_demo/landing/orders/", "JSONL landing directory")
+dbutils.widgets.text("state_path", "/Volumes/main/orders_demo/landing/_checkpoints/orders/", "Auto Loader state directory")
 catalog = dbutils.widgets.get("catalog").strip()
 schema = dbutils.widgets.get("schema").strip()
 source_path = dbutils.widgets.get("source_path").strip()
+state_path = dbutils.widgets.get("state_path").strip().rstrip("/")
 
-if not catalog or not schema or not source_path:
-    raise ValueError("catalog, schema, and source_path widgets must be set")
+if not catalog or not schema or not source_path or not state_path:
+    raise ValueError("catalog, schema, source_path, and state_path widgets must be set")
+if not source_path.startswith("/Volumes/") or not state_path.startswith("/Volumes/"):
+    raise ValueError("source_path and state_path must be Unity Catalog Volume paths")
+if state_path.startswith(source_path.rstrip("/") + "/"):
+    raise ValueError("state_path must be outside the source_path directory")
 
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
 bronze_table = f"{catalog}.{schema}.bronze_orders"
@@ -31,7 +37,7 @@ gold_table = f"{catalog}.{schema}.gold_daily_sales"
 
 # MAGIC %md
 # MAGIC ## Source
-# MAGIC Read the generated JSONL batches from a Unity Catalog Volume. Run `python scripts/generate_sample_data.py`, then upload the generated files to `source_path`. The batches include a duplicate, a later order update, late arriving business data, and an invalid row.
+# MAGIC Auto Loader incrementally reads JSONL batches from a Unity Catalog Volume. `state_path` stores its schema and checkpoint state, outside the input directory. Upload one batch, run the notebook, then upload the second batch and run again to see incremental ingestion.
 
 # COMMAND ----------
 
@@ -44,23 +50,27 @@ source_schema = T.StructType([
     T.StructField("status", T.StringType(), True),
     T.StructField("updated_at", T.StringType(), True),
 ])
-source_df = spark.read.schema(source_schema).option("multiLine", "false").json(source_path)
-display(source_df)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Bronze: preserve source records
-# MAGIC Bronze keeps the input columns and adds ingestion metadata. This batch version overwrites its sample table on each run. The next increment will add checkpointed Auto Loader ingestion for append-only batches.
-
-# COMMAND ----------
-
-bronze_df = (
-    source_df
+schema_location = f"{state_path}/schema"
+checkpoint_location = f"{state_path}/checkpoint"
+bronze_stream = (
+    spark.readStream
+    .format("cloudFiles")
+    .option("cloudFiles.format", "json")
+    .option("cloudFiles.schemaLocation", schema_location)
+    .schema(source_schema)
+    .load(source_path)
     .withColumn("_ingested_at", F.current_timestamp())
-    .withColumn("_source_file", F.input_file_name())
+    .withColumn("_source_file", F.col("_metadata.file_path"))
+    .drop("_metadata")
 )
-(bronze_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(bronze_table))
+bronze_query = (
+    bronze_stream.writeStream
+    .format("delta")
+    .option("checkpointLocation", checkpoint_location)
+    .trigger(availableNow=True)
+    .toTable(bronze_table)
+)
+bronze_query.awaitTermination()
 print(f"Bronze rows: {spark.table(bronze_table).count()}")
 
 # COMMAND ----------
@@ -132,8 +142,8 @@ display(spark.table(gold_table).orderBy("order_date"))
 
 # MAGIC %md
 # MAGIC ## Production next steps
-# MAGIC - Replace the inline sample with an Auto Loader stream from a Unity Catalog Volume or cloud storage location, using a durable checkpoint and append writes to Bronze.
-# MAGIC - Choose an incremental strategy for Silver and Gold (for example, Delta `MERGE` keyed by `order_id`) and define late-arriving data handling.
+# MAGIC - Bronze uses Auto Loader checkpoints and appends newly discovered files. Keep the input location append-only; do not overwrite previously ingested files under the same names.
+# MAGIC - Silver and Gold are full refreshes in this starter. For large data, move Silver to an incremental `MERGE` keyed by `order_id` and refresh only affected Gold dates.
 # MAGIC - Add expectations and alerting for quarantine volume, data freshness, and business metrics.
 # MAGIC - Schedule this notebook as a Databricks Workflow job and grant its run identity only the required catalog, schema, Volume, and storage permissions.
 
