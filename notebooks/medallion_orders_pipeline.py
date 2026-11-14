@@ -11,10 +11,10 @@
 from pyspark.sql import functions as F, types as T
 from pyspark.sql.window import Window
 
-dbutils.widgets.text("catalog", "main", "Unity Catalog catalog")
+dbutils.widgets.text("catalog", "workspace", "Unity Catalog catalog")
 dbutils.widgets.text("schema", "orders_demo", "Target schema")
-dbutils.widgets.text("source_path", "/Volumes/main/orders_demo/landing/orders/", "JSONL landing directory")
-dbutils.widgets.text("state_path", "/Volumes/main/orders_demo/landing/_checkpoints/orders/", "Auto Loader state directory")
+dbutils.widgets.text("source_path", "/Volumes/workspace/orders/landing/orders/", "JSONL landing directory")
+dbutils.widgets.text("state_path", "/Volumes/workspace/orders/landing/_checkpoints/orders/", "Auto Loader state directory")
 catalog = dbutils.widgets.get("catalog").strip()
 schema = dbutils.widgets.get("schema").strip()
 source_path = dbutils.widgets.get("source_path").strip()
@@ -144,6 +144,6 @@ display(spark.table(gold_table).orderBy("order_date"))
 # MAGIC ## Production next steps
 # MAGIC - Bronze uses Auto Loader checkpoints and appends newly discovered files. Keep the input location append-only; do not overwrite previously ingested files under the same names.
 # MAGIC - Silver and Gold are full refreshes in this starter. For large data, move Silver to an incremental `MERGE` keyed by `order_id` and refresh only affected Gold dates.
-# MAGIC - Add expectations and alerting for quarantine volume, data freshness, and business metrics.
-# MAGIC - Schedule this notebook as a Databricks Workflow job and grant its run identity only the required catalog, schema, Volume, and storage permissions.
+# MAGIC - Add expectations and alerting for quarantine volume, data freshness and business metrics.
+# MAGIC - Schedule this notebook as a Databricks Workflow job and grant its run identity only the required catalog, schema, Volume and storage permissions.
 
